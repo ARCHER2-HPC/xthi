@@ -1,5 +1,5 @@
 # xthi
-`xthi` is an executable program which shows process/thread placement when run using MPI/OpenMP.
+`xthi` is an executable program which shows physical process/thread placement when run using MPI/OpenMP.
 
 ## Usage
 
@@ -9,7 +9,7 @@ export OMP_NUM_THREADS=1
 srun ./xthi [options]
 ```
 
-A summary  of nodes is printed, followed by a summary of MPI  task/thread placement. As we are interested in physical placement, it is convenient to print this in node order.
+A summary  of nodes is printed, followed by a summary of MPI  task/thread placement. As we are interested in physical placement, it is convenient to print the latter in node order. Node 0 is defined by the placement of MPI rank 0 in the communicator provided (`MPI_COMM_WORLD` for the `xthi` application), but otherwise no assumptions about order are made.
 
 
 ```
