@@ -1,2 +1,2 @@
-# util-xthi
-xthi process/thread placement utility
+# xthi
+xthi is n executable program which shows process/thread placement when run using MPI/OpenMP.
