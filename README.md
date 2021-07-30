@@ -1,6 +1,15 @@
 # xthi
 `xthi` is an executable program which shows physical process/thread placement when run using MPI/OpenMP.
 
+## Compilation
+
+Compilation on ARCHER2 (all programming environments) is via the Makefile in the `src` directory
+```
+cd src
+make
+```
+This compiles versions both with (`xthi_mpi_mp`) and without (`xthi_mpi`) OpenMP.
+
 ## Usage
 
 For example, using `srun` as parallel launch
