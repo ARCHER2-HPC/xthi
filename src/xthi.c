@@ -17,6 +17,8 @@
 #define omp_get_thread_num()  0
 #endif
 
+#include "xpu.h"
+
 struct xthi_options_s {
   unsigned int c;       /* Create, and report on, a Cartesian communicator */
   unsigned int r;       /* Use reorder true in MPI_Cart_create() */
@@ -161,8 +163,9 @@ int xthi_print_node(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
 
   if (1) {
     int ompsz = 1;
+    int ndevice = 0;
 
-    /* Message: node, hostname, mpi tasks (shared comm size), exec */
+    /* Message: node, hostname, mpi tasks (shared comm size), [gpu] exec */
     char * exec = strrchr(argv[0], '/');
     if (exec == NULL) exec = argv[0];
     if (exec[0] == '/') exec = &exec[1];
@@ -172,9 +175,11 @@ int xthi_print_node(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
       ompsz = omp_get_num_threads();
     }
 
+    xpuGetDeviceCount(&ndevice);
+
     (void) gethostname(hnbuf, sizeof(hnbuf));
-    sprintf(msg, "Node %4d, hostname %s, mpi %3d, omp %3d, executable %s\n",
-	    noderank, hnbuf, ssz, ompsz, exec);
+    sprintf(msg, "Node %4d, hostname %s, mpi %3d, omp %3d, gpu %d, exec %s\n",
+	    noderank, hnbuf, ssz, ompsz, ndevice, exec);
 
     /* All ranks send again */
     if (rank > 0) {
@@ -298,6 +303,8 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
   int nthreads = -1;               /* Total threads this rank */
   int nid = -1;                    /* Node id 0,1,... */
 
+  int ndevice = 0;                 /* Default GPU not present. */
+
   MPI_Request sreq[3] = {};        /* Requests in shared comm */
   MPI_Request * nreq = NULL;       /* Requests in xnodes comm 1 per thread */
 
@@ -332,6 +339,11 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
     xthi_cart(parent, ndim, reorder, &cart);
     xthi_cart_str(&cart, exbuf);
   }
+
+  /* HACK Use exbuf for GPU information for time being. */
+  /* Means can't have both MPI cart coords and GPU info. */
+
+  xpuGetDeviceCount(&ndevice);
 
   /* We can define rank 0 to be on node 0, but after that, can make
    * no assumptions about where ranks have been placed.
@@ -383,16 +395,29 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
 #pragma omp parallel private(ms)
   {
     int tid = omp_get_thread_num();
+    int cpu = sched_getcpu();
 
     cpu_set_t coremask;
     char clbuf[7 * CPU_SETSIZE];
+    char gpubuf[16] = "";
 
     memset(clbuf, 0, sizeof(clbuf));
     sched_getaffinity(0, sizeof(coremask), &coremask);
     cpuset_to_cstr(&coremask, clbuf);
 
-    sprintf(ms, "Node %4d, rank %4d, thread %3d, (affinity = %4s) %s\n",
-	    nid, prank, tid, clbuf, exbuf);
+    /* GPU: no cart coords via "exbuf" */
+    if (ndevice) {
+      int device = -1;
+      xpuGetDevice(&device);
+      sprintf(gpubuf, "device %2d", device);
+      sprintf(ms, "Node %4d, rank %4d, thread %3d, (cpu %3d, set %4s) %s\n",
+	      nid, prank, tid, cpu, clbuf, gpubuf);
+    }
+    else {
+
+      sprintf(ms, "Node %4d, rank %4d, thread %3d, (cpu %3d, set %4s) %s\n",
+	      nid, prank, tid, cpu, clbuf, exbuf);
+    }
 
     for (int nt = 0; nt < nthreads; nt++) {
       #pragma omp barrier

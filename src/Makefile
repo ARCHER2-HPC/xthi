@@ -7,15 +7,17 @@ default:
 
 xthi:
 	$(CC) -fPIC -Wall -c -o xthi.o xthi.c
-	$(AR) -crs libxthi_mpi.a xthi.o
-	$(CC) -shared -o libxthi_mpi.so xthi.o
-	$(CC) -o xthi_mpi xthi.o main.c
+	$(CC) -fPIC -Wall -c xpu.c
+	$(AR) -crs libxthi_mpi.a xpu.o xthi.o
+	$(CC) -shared -o libxthi_mpi.so xpu.o xthi.o
+	$(CC) -o xthi_mpi xpu.o xthi.o main.c
 
 xthi_mp:
 	$(CC) -fPIC -fopenmp -c -o xthi.o xthi.c
-	$(AR) -crs libxthi_mpi_mp.a xthi.o
-	$(CC) -fopenmp -shared -o libxthi_mpi_mp.so xthi.o
-	$(CC) -fopenmp -o xthi_mpi_mp xthi.o main.c
+	$(CC) -fPIC -Wall -c xpu.c
+	$(AR) -crs libxthi_mpi_mp.a xpu.o xthi.o
+	$(CC) -fopenmp -shared -o libxthi_mpi_mp.so xpu.o xthi.o
+	$(CC) -fopenmp -o xthi_mpi_mp xpu.o xthi.o main.c
 
 install:
 	echo "Install location: ${PREFIX}" 
