@@ -13,5 +13,6 @@ typedef int xpu_err_t;
 
 xpu_err_t xpuGetDeviceCount(int * ndevice);
 xpu_err_t xpuGetDevice(int * device);
+xpu_err_t xpuDeviceGetPCIBusId(char * pciBusId, int len, int device);
 
 #endif

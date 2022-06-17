@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 
 #include <assert.h>
 #include <stdio.h>
@@ -17,7 +16,7 @@
 #define omp_get_thread_num()  0
 #endif
 
-#include "xpu.h"
+#include "gpu.h"
 
 struct xthi_options_s {
   unsigned int c;       /* Create, and report on, a Cartesian communicator */
@@ -162,8 +161,9 @@ int xthi_print_node(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
   /* Root receives msg from shared rank 0 in each node */
 
   if (1) {
+    /* We can't use getDeviceCount() because we want number per node */
     int ompsz = 1;
-    int ndevice = 0;
+    int ndevice = gpu_per_node();
 
     /* Message: node, hostname, mpi tasks (shared comm size), [gpu] exec */
     char * exec = strrchr(argv[0], '/');
@@ -175,11 +175,16 @@ int xthi_print_node(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
       ompsz = omp_get_num_threads();
     }
 
-    xpuGetDeviceCount(&ndevice);
-
     (void) gethostname(hnbuf, sizeof(hnbuf));
-    sprintf(msg, "Node %4d, hostname %s, mpi %3d, omp %3d, gpu %d, exec %s\n",
+    if (ndevice == 0) {
+      sprintf(msg, "Node %4d, hostname %s, mpi %3d, omp %3d, executable %s\n",
+	            noderank, hnbuf, ssz, ompsz, exec);
+    }
+    else {
+      /* Report GPU per node */
+      sprintf(msg, "Node %4d, hostname %s, mpi %3d, omp %3d, gpu %d, exe %s\n",
 	    noderank, hnbuf, ssz, ompsz, ndevice, exec);
+    }
 
     /* All ranks send again */
     if (rank > 0) {
@@ -340,9 +345,7 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
     xthi_cart_str(&cart, exbuf);
   }
 
-  /* HACK Use exbuf for GPU information for time being. */
-  /* Means can't have both MPI cart coords and GPU info. */
-
+  /* Device count */
   xpuGetDeviceCount(&ndevice);
 
   /* We can define rank 0 to be on node 0, but after that, can make
@@ -386,7 +389,7 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
     sreq[2] = MPI_REQUEST_NULL;
   }
 
-  /* Every thread forms a string and sends to root in in parent.
+  /* Every thread frms a string and sends to root in in parent.
    * These should be in thread order. */
 
   nreq = (MPI_Request *) calloc(nthreads, sizeof(MPI_Request));
@@ -399,24 +402,25 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
 
     cpu_set_t coremask;
     char clbuf[7 * CPU_SETSIZE];
-    char gpubuf[16] = "";
+    char gpubuf[32] = "";
 
     memset(clbuf, 0, sizeof(clbuf));
     sched_getaffinity(0, sizeof(coremask), &coremask);
     cpuset_to_cstr(&coremask, clbuf);
 
-    /* GPU: no cart coords via "exbuf" */
-    if (ndevice) {
-      int device = -1;
-      xpuGetDevice(&device);
-      sprintf(gpubuf, "device %2d", device);
-      sprintf(ms, "Node %4d, rank %4d, thread %3d, (cpu %3d, set %4s) %s\n",
-	      nid, prank, tid, cpu, clbuf, gpubuf);
-    }
-    else {
-
+    if (ndevice == 0) {
       sprintf(ms, "Node %4d, rank %4d, thread %3d, (cpu %3d, set %4s) %s\n",
 	      nid, prank, tid, cpu, clbuf, exbuf);
+    }
+    else {
+      /* GPU: insert local device info */
+      int device = -1;
+      xpuGetDevice(&device);
+      assert(ndevice < 10); /* single figures at the moment! */
+      sprintf(gpubuf, "device %1d/%1d (rsmi%d)", device, ndevice,
+	      gpu_node_id(device));
+      sprintf(ms, "Node %4d, rank %4d, thread %3d, (cpu %3d, set %7s) %s %s\n",
+	      nid, prank, tid, cpu, clbuf, gpubuf, exbuf);
     }
 
     for (int nt = 0; nt < nthreads; nt++) {
@@ -449,8 +453,8 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
       int nrsz = -1;
       MPI_Recv(&nrsz, 1, MPI_INT, node, 700, xnodes, MPI_STATUS_IGNORE);
 
-      rranks = calloc(nrsz, sizeof(int));
-      rthreads = calloc(nrsz, sizeof(int));
+      rranks = (int *) calloc(nrsz, sizeof(int));
+      rthreads = (int *) calloc(nrsz, sizeof(int));
       assert(rranks);
       assert(rthreads);
       MPI_Recv(rranks, nrsz, MPI_INT, node, 701, xnodes, MPI_STATUS_IGNORE);

@@ -3,21 +3,30 @@
 default:
 	$(MAKE) xthi xthi_mp
 
+CC = cc
+MACHINE = gpu_null
+
+# E.g.
+#CFLAGS_EXTRA = -x hip --offload-arch=gfx90a
+#MACHINE = gpu_amd8
+
 # Build both with and without OpenMP
 
 xthi:
-	$(CC) -fPIC -Wall -c -o xthi.o xthi.c
-	$(CC) -fPIC -Wall -c xpu.c
-	$(AR) -crs libxthi_mpi.a xpu.o xthi.o
-	$(CC) -shared -o libxthi_mpi.so xpu.o xthi.o
-	$(CC) -o xthi_mpi xpu.o xthi.o main.c
+	$(CC) $(CFLAGS_EXTRA) -fPIC -c -o xthi.o xthi.c
+	$(CC) $(CFLAGS_EXTRA) -fPIC -c $(MACHINE).c
+	$(CC) $(CFLAGS_EXTRA) -fPIC -c main.c
+	$(AR) -crs libxthi_mpi.a $(MACHINE).o xthi.o
+	$(CC) -shared -o libxthi_mpi.so $(MACHINE).o xthi.o
+	$(CC) -o xthi_mpi $(MACHINE).o xthi.o main.o
 
 xthi_mp:
-	$(CC) -fPIC -fopenmp -c -o xthi.o xthi.c
-	$(CC) -fPIC -Wall -c xpu.c
-	$(AR) -crs libxthi_mpi_mp.a xpu.o xthi.o
-	$(CC) -fopenmp -shared -o libxthi_mpi_mp.so xpu.o xthi.o
-	$(CC) -fopenmp -o xthi_mpi_mp xpu.o xthi.o main.c
+	$(CC) $(CFLAGS_EXTRA) -fPIC -fopenmp -c -o xthi.o xthi.c
+	$(CC) $(CFLAGS_EXTRA) -fPIC -c $(MACHINE).c
+	$(CC) $(CFLAGS_EXTRA) -fPIC -c main.c
+	$(AR) -crs libxthi_mpi_mp.a $(MACHINE).o xthi.o
+	$(CC) -fopenmp -shared -o libxthi_mpi_mp.so $(MACHINE).o xthi.o
+	$(CC) -fopenmp -o xthi_mpi_mp $(MACHINE).o xthi.o main.o
 
 install:
 	echo "Install location: ${PREFIX}" 

@@ -6,26 +6,6 @@
 
 #include "xpu.h"
 
-#ifdef __HIPCC__
-
-#include <hip/hip_runtime.h>
-
-xpu_err_t xpuGetDeviceCount(int * ndevice) {
-
-  hipGetDevice_count(ndevice);
-
-  return 0;
-}
-
-xpu_err_t xpuGetDevice(int * device) {
-
-  hipGetDevice(device);
-
-  return 0;
-}
-
-#else
-
 xpu_err_t xpuGetDeviceCount(int * ndevice) {
 
   *ndevice = 0;
@@ -40,4 +20,9 @@ xpu_err_t xpuGetDevice(int * device) {
   return -1;
 }
 
-#endif
+xpu_err_t xpuDeviceGetPCIBusId(char * pciBusId, int len, int device) {
+
+  /* No op. */
+
+  return 0;
+}
