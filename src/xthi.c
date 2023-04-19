@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sched.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <mpi.h>
@@ -19,6 +20,7 @@
 
 struct xthi_options_s {
   unsigned int c;       /* Create, and report on, a Cartesian communicator */
+  unsigned int d;       /* Report start and end time */
   unsigned int r;       /* Use reorder true in MPI_Cart_create() */
   unsigned int s;       /* sleep(seconds) before MPI_Finalize() */
   unsigned int t;       /* Do not report threads (or "report thread 0 only") */
@@ -35,6 +37,7 @@ struct xthi_cart_s {
 
 typedef struct xthi_cart_s xthi_cart_t;
 
+int xthi_time(char * str, int bufsiz);
 int xthi_options(int argc, char * argv[], xthi_options_t * opts);
 int xthi_cart(MPI_Comm parent, int ndim, int reorder, xthi_cart_t * cart);
 int xthi_cart_str(const xthi_cart_t * cart, char * buf);
@@ -70,6 +73,30 @@ static char *cpuset_to_cstr(cpu_set_t *mask, char *str)
   return(str);
 }
 
+/* Convenience to retrun standard time string */
+
+int xthi_time(char * str, int bufsiz) {
+
+  static const char * strdefault = "Unavailable\n";
+  time_t now = time(NULL);
+  int ierr = -1;
+
+  assert(str);
+  strncpy(str, strdefault, strnlen(strdefault, bufsiz-1));
+
+  if (now != (time_t) -1) {
+    char buf[BUFSIZ] = {0};
+    char * c_time = ctime_r(&now, buf);
+    if (c_time != NULL) {
+      strncpy(str, buf, strnlen(buf, bufsiz-1));
+      ierr = 0;
+    }
+  }
+
+  return ierr;
+}
+
+
 /* Parse command line argc, argv for options of interest. */
 
 int xthi_options(int argc, char * argv[], xthi_options_t * opts) {
@@ -87,8 +114,12 @@ int xthi_options(int argc, char * argv[], xthi_options_t * opts) {
 	fprintf(stderr, "Invalid value for -c option\n");
       }
       break;
+    case 'd':
+      opts->d = 1;
+      break;
     case 'r':
       opts->r = 1;
+      break;
     case 's':
       opts->s = (unsigned int) strtoul(argv[++optind], NULL, 0);
       break;
@@ -99,6 +130,7 @@ int xthi_options(int argc, char * argv[], xthi_options_t * opts) {
       fprintf(stderr, "Unrecognised option: %s\n", argv[optind]);
       fprintf(stderr, "Usage: %s [-cs]\n", argv[0]);
       fprintf(stderr, "Option [-c]       Cartesian communicator\n");
+      fprintf(stderr, "Option [-d]       Report start/end time\n");
       fprintf(stderr, "Option [-r]       Reorder in MPI_Cart_create()\n");
       fprintf(stderr, "Option [-s sleep] work for s seconds\n");
       fprintf(stderr, "Option [-t]       report thread 0 only\n");
@@ -312,10 +344,24 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
   assert(fp);
 
   xthi_options(argc, argv, &options);
-  xthi_print_node(parent, argc, argv, fp);
 
   MPI_Comm_rank(parent, &prank);
   MPI_Comm_size(parent, &psz);
+
+  if (options.d) {
+    /* Start date string at rank zero */
+    char tbuf[BUFSIZ] = {};
+    xthi_time(tbuf, BUFSIZ);
+    if (prank == 0) {
+      char * exec = strrchr(argv[0], '/');
+      if (exec == NULL) exec = argv[0];
+      if (exec[0] == '/') exec = &exec[1];
+      printf("%s start time at root: %s\n", exec, tbuf);
+    }
+    MPI_Barrier(parent);
+  }
+
+  xthi_print_node(parent, argc, argv, fp);
 
   /* Shared communicator (per node) */
   MPI_Comm_split_type(parent, MPI_COMM_TYPE_SHARED, prank, MPI_INFO_NULL,
@@ -455,6 +501,19 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
 
   sleep(options.s);
   MPI_Barrier(parent);
+
+  if (options.d) {
+    /* End date string at rank zero */
+    char tbuf[BUFSIZ] = {};
+    xthi_time(tbuf, BUFSIZ);
+    if (prank == 0) {
+      char * exec = strrchr(argv[0], '/');
+      if (exec == NULL) exec = argv[0];
+      if (exec[0] == '/') exec = &exec[1];
+      printf("%s end time at root: %s\n", exec, tbuf);
+    }
+    MPI_Barrier(parent);
+  }
 
   return 0;
 }
