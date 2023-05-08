@@ -23,6 +23,7 @@
 struct xthi_options_s {
   unsigned int c;       /* Create, and report on, a Cartesian communicator */
   unsigned int d;       /* Report start and end time */
+  unsigned int g;       /* Report sched_getcpu() in addition to "affinity" */
   unsigned int r;       /* Use reorder true in MPI_Cart_create() */
   unsigned int s;       /* sleep(seconds) before MPI_Finalize() */
   unsigned int t;       /* Do not report threads (or "report thread 0 only") */
@@ -119,6 +120,9 @@ int xthi_options(int argc, char * argv[], xthi_options_t * opts) {
     case 'd':
       opts->d = 1;
       break;
+    case 'g':
+      opts->g = 1;
+      break;
     case 'r':
       opts->r = 1;
       break;
@@ -133,6 +137,7 @@ int xthi_options(int argc, char * argv[], xthi_options_t * opts) {
       fprintf(stderr, "Usage: %s [-cs]\n", argv[0]);
       fprintf(stderr, "Option [-c]       Cartesian communicator\n");
       fprintf(stderr, "Option [-d]       Report start/end time\n");
+      fprintf(stderr, "Option [-g]       Report sched_getcpu() as cpu\n");
       fprintf(stderr, "Option [-r]       Reorder in MPI_Cart_create()\n");
       fprintf(stderr, "Option [-s sleep] work for s seconds\n");
       fprintf(stderr, "Option [-t]       report thread 0 only\n");
@@ -456,8 +461,16 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
     cpuset_to_cstr(&coremask, clbuf);
 
     if (ndevice == 0) {
-      sprintf(ms, "Node %4d, rank %4d, thread %3d, (cpu %3d, set %4s) %s\n",
-	      nid, prank, tid, cpu, clbuf, exbuf);
+      if (options.g) {
+	/* with sched_getcpu() */
+        sprintf(ms, "Node %4d, rank %4d, thread %3d, (cpu %3d, set %4s) %s\n",
+	        nid, prank, tid, cpu, clbuf, exbuf);
+      }
+      else {
+	/* original form */
+        sprintf(ms, "Node %4d, rank %4d, thread %3d, (affinity = %4s) %s\n",
+	        nid, prank, tid, clbuf, exbuf);
+      }
     }
     else {
       /* GPU: insert local device info */

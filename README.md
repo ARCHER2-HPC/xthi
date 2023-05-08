@@ -26,6 +26,7 @@ Options
 
 -c 1|2|3    report on Cartesian communicator with given number of dimensions
 -d          report start and end time/date
+-g          report sched_getcpu() as "cpu" (as well as cpu set as "affinity")
 -r          use "reorder" true in MPI_Create_create() (when using -c)
 -s seconds  wait for given number of seconds before exiting with MPI_Finalize().
             This can be useful to prevent immediate exit of the application.
