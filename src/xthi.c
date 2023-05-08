@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sched.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <mpi.h>
@@ -17,8 +18,12 @@
 #define omp_get_thread_num()  0
 #endif
 
+#include "gpu.h"
+
 struct xthi_options_s {
   unsigned int c;       /* Create, and report on, a Cartesian communicator */
+  unsigned int d;       /* Report start and end time */
+  unsigned int g;       /* Report sched_getcpu() in addition to "affinity" */
   unsigned int r;       /* Use reorder true in MPI_Cart_create() */
   unsigned int s;       /* sleep(seconds) before MPI_Finalize() */
   unsigned int t;       /* Do not report threads (or "report thread 0 only") */
@@ -35,6 +40,7 @@ struct xthi_cart_s {
 
 typedef struct xthi_cart_s xthi_cart_t;
 
+int xthi_time(char * str, int bufsiz);
 int xthi_options(int argc, char * argv[], xthi_options_t * opts);
 int xthi_cart(MPI_Comm parent, int ndim, int reorder, xthi_cart_t * cart);
 int xthi_cart_str(const xthi_cart_t * cart, char * buf);
@@ -70,6 +76,30 @@ static char *cpuset_to_cstr(cpu_set_t *mask, char *str)
   return(str);
 }
 
+/* Convenience to retrun standard time string */
+
+int xthi_time(char * str, int bufsiz) {
+
+  static const char * strdefault = "Unavailable\n";
+  time_t now = time(NULL);
+  int ierr = -1;
+
+  assert(str);
+  strncpy(str, strdefault, strnlen(strdefault, bufsiz-1));
+
+  if (now != (time_t) -1) {
+    char buf[BUFSIZ] = {0};
+    char * c_time = ctime_r(&now, buf);
+    if (c_time != NULL) {
+      strncpy(str, buf, strnlen(buf, bufsiz-1));
+      ierr = 0;
+    }
+  }
+
+  return ierr;
+}
+
+
 /* Parse command line argc, argv for options of interest. */
 
 int xthi_options(int argc, char * argv[], xthi_options_t * opts) {
@@ -87,8 +117,15 @@ int xthi_options(int argc, char * argv[], xthi_options_t * opts) {
 	fprintf(stderr, "Invalid value for -c option\n");
       }
       break;
+    case 'd':
+      opts->d = 1;
+      break;
+    case 'g':
+      opts->g = 1;
+      break;
     case 'r':
       opts->r = 1;
+      break;
     case 's':
       opts->s = (unsigned int) strtoul(argv[++optind], NULL, 0);
       break;
@@ -99,6 +136,8 @@ int xthi_options(int argc, char * argv[], xthi_options_t * opts) {
       fprintf(stderr, "Unrecognised option: %s\n", argv[optind]);
       fprintf(stderr, "Usage: %s [-cs]\n", argv[0]);
       fprintf(stderr, "Option [-c]       Cartesian communicator\n");
+      fprintf(stderr, "Option [-d]       Report start/end time\n");
+      fprintf(stderr, "Option [-g]       Report sched_getcpu() as cpu\n");
       fprintf(stderr, "Option [-r]       Reorder in MPI_Cart_create()\n");
       fprintf(stderr, "Option [-s sleep] work for s seconds\n");
       fprintf(stderr, "Option [-t]       report thread 0 only\n");
@@ -160,9 +199,11 @@ int xthi_print_node(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
   /* Root receives msg from shared rank 0 in each node */
 
   if (1) {
+    /* We can't use getDeviceCount() because we want number per node */
     int ompsz = 1;
+    int ndevice = gpu_per_node();
 
-    /* Message: node, hostname, mpi tasks (shared comm size), exec */
+    /* Message: node, hostname, mpi tasks (shared comm size), [gpu] exec */
     char * exec = strrchr(argv[0], '/');
     if (exec == NULL) exec = argv[0];
     if (exec[0] == '/') exec = &exec[1];
@@ -173,8 +214,15 @@ int xthi_print_node(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
     }
 
     (void) gethostname(hnbuf, sizeof(hnbuf));
-    sprintf(msg, "Node %4d, hostname %s, mpi %3d, omp %3d, executable %s\n",
-	    noderank, hnbuf, ssz, ompsz, exec);
+    if (ndevice == 0) {
+      sprintf(msg, "Node %4d, hostname %s, mpi %3d, omp %3d, executable %s\n",
+	            noderank, hnbuf, ssz, ompsz, exec);
+    }
+    else {
+      /* Report GPU per node */
+      sprintf(msg, "Node %4d, hostname %s, mpi %3d, omp %3d, gpu %d, exe %s\n",
+	    noderank, hnbuf, ssz, ompsz, ndevice, exec);
+    }
 
     /* All ranks send again */
     if (rank > 0) {
@@ -298,6 +346,8 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
   int nthreads = -1;               /* Total threads this rank */
   int nid = -1;                    /* Node id 0,1,... */
 
+  int ndevice = 0;                 /* Default GPU not present. */
+
   MPI_Request sreq[3] = {};        /* Requests in shared comm */
   MPI_Request * nreq = NULL;       /* Requests in xnodes comm 1 per thread */
 
@@ -312,10 +362,24 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
   assert(fp);
 
   xthi_options(argc, argv, &options);
-  xthi_print_node(parent, argc, argv, fp);
 
   MPI_Comm_rank(parent, &prank);
   MPI_Comm_size(parent, &psz);
+
+  if (options.d) {
+    /* Start date string at rank zero */
+    char tbuf[BUFSIZ] = {};
+    xthi_time(tbuf, BUFSIZ);
+    if (prank == 0) {
+      char * exec = strrchr(argv[0], '/');
+      if (exec == NULL) exec = argv[0];
+      if (exec[0] == '/') exec = &exec[1];
+      printf("%s start time at root: %s\n", exec, tbuf);
+    }
+    MPI_Barrier(parent);
+  }
+
+  xthi_print_node(parent, argc, argv, fp);
 
   /* Shared communicator (per node) */
   MPI_Comm_split_type(parent, MPI_COMM_TYPE_SHARED, prank, MPI_INFO_NULL,
@@ -332,6 +396,9 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
     xthi_cart(parent, ndim, reorder, &cart);
     xthi_cart_str(&cart, exbuf);
   }
+
+  /* Device count */
+  xpuGetDeviceCount(&ndevice);
 
   /* We can define rank 0 to be on node 0, but after that, can make
    * no assumptions about where ranks have been placed.
@@ -374,7 +441,7 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
     sreq[2] = MPI_REQUEST_NULL;
   }
 
-  /* Every thread forms a string and sends to root in in parent.
+  /* Every thread frms a string and sends to root in in parent.
    * These should be in thread order. */
 
   nreq = (MPI_Request *) calloc(nthreads, sizeof(MPI_Request));
@@ -383,16 +450,38 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
 #pragma omp parallel private(ms)
   {
     int tid = omp_get_thread_num();
+    int cpu = sched_getcpu();
 
     cpu_set_t coremask;
     char clbuf[7 * CPU_SETSIZE];
+    char gpubuf[32] = "";
 
     memset(clbuf, 0, sizeof(clbuf));
     sched_getaffinity(0, sizeof(coremask), &coremask);
     cpuset_to_cstr(&coremask, clbuf);
 
-    sprintf(ms, "Node %4d, rank %4d, thread %3d, (affinity = %4s) %s\n",
-	    nid, prank, tid, clbuf, exbuf);
+    if (ndevice == 0) {
+      if (options.g) {
+	/* with sched_getcpu() */
+        sprintf(ms, "Node %4d, rank %4d, thread %3d, (cpu %3d, set %4s) %s\n",
+	        nid, prank, tid, cpu, clbuf, exbuf);
+      }
+      else {
+	/* original form */
+        sprintf(ms, "Node %4d, rank %4d, thread %3d, (affinity = %4s) %s\n",
+	        nid, prank, tid, clbuf, exbuf);
+      }
+    }
+    else {
+      /* GPU: insert local device info */
+      int device = -1;
+      xpuGetDevice(&device);
+      assert(ndevice < 10); /* single figures at the moment! */
+      sprintf(gpubuf, "device %1d/%1d (rsmi%d)", device, ndevice,
+	      gpu_node_id(device));
+      sprintf(ms, "Node %4d, rank %4d, thread %3d, (cpu %3d, set %7s) %s %s\n",
+	      nid, prank, tid, cpu, clbuf, gpubuf, exbuf);
+    }
 
     for (int nt = 0; nt < nthreads; nt++) {
       #pragma omp barrier
@@ -424,8 +513,8 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
       int nrsz = -1;
       MPI_Recv(&nrsz, 1, MPI_INT, node, 700, xnodes, MPI_STATUS_IGNORE);
 
-      rranks = calloc(nrsz, sizeof(int));
-      rthreads = calloc(nrsz, sizeof(int));
+      rranks = (int *) calloc(nrsz, sizeof(int));
+      rthreads = (int *) calloc(nrsz, sizeof(int));
       assert(rranks);
       assert(rthreads);
       MPI_Recv(rranks, nrsz, MPI_INT, node, 701, xnodes, MPI_STATUS_IGNORE);
@@ -455,6 +544,19 @@ int xthi_print(MPI_Comm parent, int argc, char ** argv, FILE * fp) {
 
   sleep(options.s);
   MPI_Barrier(parent);
+
+  if (options.d) {
+    /* End date string at rank zero */
+    char tbuf[BUFSIZ] = {};
+    xthi_time(tbuf, BUFSIZ);
+    if (prank == 0) {
+      char * exec = strrchr(argv[0], '/');
+      if (exec == NULL) exec = argv[0];
+      if (exec[0] == '/') exec = &exec[1];
+      printf("%s end time at root: %s\n", exec, tbuf);
+    }
+    MPI_Barrier(parent);
+  }
 
   return 0;
 }
