@@ -32,3 +32,15 @@ Options
             This can be useful to prevent immediate exit of the application.
 -t          report on thread 0 only; default is to report placement for all threads.
 ```
+
+If the option `-c` is specified, the Cartesian information is appended as
+```
+Node    0, rank    0, thread   0, (affinity =    0)  Cartesian    0 ( 0  0  0)
+Node    0, rank    1, thread   0, (affinity =    1)  Cartesian    1 ( 0  0  1)
+Node    0, rank    2, thread   0, (affinity =    2)  Cartesian    4 ( 0  1  0)
+Node    0, rank    3, thread   0, (affinity =    3)  Cartesian    5 ( 0  1  1)
+```
+where the first column after `Cartesian` is the rank in the Cartesian
+communicator, and the Cartesian co-ordinates follow in brackets. The
+Cartesian rank may or may not be the same as the rank in `MPI_COMM_WORLD`
+(reported in the fourth column).
