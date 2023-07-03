@@ -291,7 +291,7 @@ int xthi_cart_str(const xthi_cart_t * cart, char * buf) {
     sprintf(buf, " Cartesian (%2d %2d)", cart->coords[0], cart->coords[1]);
     break;
   case 3:
-    sprintf(buf, " Cartesian (%2d %2d %2d)",
+    sprintf(buf, " Cartesian %4d (%2d %2d %2d)", cart->rank,
 	    cart->coords[0], cart->coords[1], cart->coords[2]);
     break;
   default:
